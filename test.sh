@@ -63,15 +63,15 @@ no [ -L "$acc/skills/mine" ]
 # a file owned by the account is kept and reported, never overwritten
 rm "$acc/CLAUDE.md"
 echo own > "$acc/CLAUDE.md"
-ok sh -c "'$csa' work 2>&1 | grep -q 'is not shared'"
+ok sh -c "'$csa' work 2>&1 | grep 'is not shared' >/dev/null"
 ok [ "$(cat "$acc/CLAUDE.md")" = own ]
 
 no "$csa" add work 2>/dev/null
 no "$csa" add ../x 2>/dev/null
 no "$csa" add ls 2>/dev/null
 no "$csa" nope 2>/dev/null
-ok sh -c "'$csa' ls | grep -q '^default .*me@home.dev'"
-ok sh -c "'$csa' ls | grep -q '^work .*(not logged in)'"
+ok sh -c "'$csa' ls | grep '^default .*me@home.dev' >/dev/null"
+ok sh -c "'$csa' ls | grep '^work .*(not logged in)' >/dev/null"
 
 # a failure before login leaves no half-made account behind
 if [ "$(id -u)" != 0 ]; then

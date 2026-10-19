@@ -7,7 +7,14 @@ different terminals.
 
 ## Install
 
-Requires bash and Claude Code. `jq` is optional: it is used to copy your MCP servers.
+Requires bash and Claude Code (macOS, Linux or WSL). `jq` is optional: it is used to copy
+your MCP servers.
+
+```sh
+npm install -g @osrcmap/multiacclaude   # installs the claude-switch-account and csa commands
+```
+
+Or from source:
 
 ```sh
 git clone https://github.com/osrcmap/multiacclaude ~/multiacclaude

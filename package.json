@@ -1,0 +1,39 @@
+{
+  "name": "@osrcmap/multiacclaude",
+  "version": "0.1.0",
+  "description": "Switch between Claude Code accounts (work, personal…) while sharing your config",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "anthropic",
+    "cli",
+    "account-switcher",
+    "multi-account",
+    "developer-tools"
+  ],
+  "license": "MIT",
+  "author": "Oscar Macchiavello (https://github.com/osrcmap)",
+  "homepage": "https://github.com/osrcmap/multiacclaude#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/osrcmap/multiacclaude.git"
+  },
+  "bugs": "https://github.com/osrcmap/multiacclaude/issues",
+  "bin": {
+    "claude-switch-account": "claude-switch-account",
+    "csa": "claude-switch-account"
+  },
+  "files": [
+    "claude-switch-account"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "test": "./test.sh"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

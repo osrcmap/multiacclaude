@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# csa: run Claude Code with another account. Each account is its own
+# CLAUDE_CONFIG_DIR (login, history, sessions, memory, plugins, caches); the
+# config you write yourself is shared with the default account in ~/.claude.
+set -euo pipefail
+
+HOME_DIR=${HOME%/}   # a trailing slash would change the macOS keychain entry name
+SRC="$HOME_DIR/.claude"
+ROOT="$HOME_DIR/.claude-accounts"
+
+# Shared via symlink. Claude writes user settings through symlinks and reads
+# these from them; skills/ and plugins/ are handled apart (see below).
+SHARED="settings.json CLAUDE.md keybindings.json agents commands output-styles hooks rules themes workflows"
+
+die() { echo "csa: $*" >&2; exit 1; }
+warn() { echo "csa: $*" >&2; }
+
+usage() {
+  cat <<EOF
+Usage:
+  csa add <name> [--sso | --console | --email X]   create an account and log in
+  csa <name> [claude args...]                      start Claude with that account
+  csa ls                                           list accounts
+  claude                                           default account (~/.claude)
+EOF
+}
+
+check_name() {
+  case $1 in
+    ''|-*|.*|*[!A-Za-z0-9._-]*) die "invalid name: '$1' (use letters, digits, . _ -)" ;;
+    add|ls|help) die "'$1' is a reserved name" ;;
+  esac
+}
+
+email_of() {   # email_of <.claude.json>
+  local e=
+  if [ -f "$1" ] && command -v jq >/dev/null 2>&1; then
+    e=$(jq -r '.oauthAccount.emailAddress // empty' "$1" 2>/dev/null || true)
+  elif [ -f "$1" ]; then
+    e=$(sed -n 's/.*"emailAddress": *"\([^"]*\)".*/\1/p' "$1" | head -n 1)
+  fi
+  echo "${e:-(not logged in)}"
+}
+
+list() {
+  local d
+  printf '%-12s %-32s %s\n' default "~/.claude" "$(email_of "$HOME_DIR/.claude.json")"
+  for d in "$ROOT"/*/; do
+    [ -d "$d" ] || continue
+    d=${d%/}
+    printf '%-12s %-32s %s\n' "${d##*/}" "~${d#"$HOME_DIR"}" "$(email_of "$d/.claude.json")"
+  done
+}
+
+link() {   # link <path relative to ~/.claude> <account dir>
+  local s="$SRC/$1" d="$2/$1"
+  [ -e "$s" ] || return 0
+  if [ -L "$d" ] && [ "$(readlink "$d")" = "$s" ]; then
+    return 0
+  fi
+  if [ -e "$d" ] || [ -L "$d" ]; then
+    warn "${d#"$HOME_DIR/"} belongs to this account and is not shared with ~/.claude/$1 (merge it into ~/.claude and delete it to share it again)"
+    return 0
+  fi
+  ln -s "$s" "$d"
+}
+
+sync_links() {   # sync_links <account dir>; runs on every launch, so new shared items show up
+  local dir=$1 rel s l
+  for rel in $SHARED; do
+    link "$rel" "$dir"
+  done
+  # skills/ must be a real dir: Claude refuses to sync claude.ai skills into a
+  # symlinked one. Share each skill instead, except the per-account synced/.
+  mkdir -p "$dir/skills"
+  for s in "$SRC"/skills/*; do
+    case ${s##*/} in synced|'*') continue ;; esac
+    link "skills/${s##*/}" "$dir"
+  done
+  for l in "$dir"/skills/*; do   # drop links to skills deleted from ~/.claude
+    if [ -L "$l" ] && [ ! -e "$l" ]; then
+      case $(readlink "$l") in "$SRC/skills/"*) rm "$l" ;; esac
+    fi
+  done
+}
+
+esc_re() { printf '%s' "$1" | sed 's/[][\.*^$|]/\\&/g'; }
+esc_rp() { printf '%s' "$1" | sed 's/[&|\\]/\\&/g'; }
+
+copy_plugins() {   # copy_plugins <account dir>
+  # Installed plugins can't be shared: each account sweeps old versions from its
+  # own cache. Start from a copy; the shared settings.json keeps them in sync.
+  local src="$SRC/plugins" dst="$1/plugins" e f
+  [ -d "$src" ] || return 0
+  mkdir -p "$dst"
+  for e in "$src"/* "$src"/.[!.]*; do
+    [ -e "$e" ] || continue
+    [ "${e##*/}" = synced ] && continue   # synced from each claude.ai account
+    cp -a "$e" "$dst/"
+  done
+  for f in "$dst"/*.json; do   # point absolute install paths at the copy
+    [ -f "$f" ] || continue
+    sed "s|$(esc_re "$src/")|$(esc_rp "$dst/")|g" "$f" > "$f.tmp"
+    mv "$f.tmp" "$f"
+  done
+}
+
+copy_mcp() {   # copy_mcp <account dir>
+  # User and local MCP servers live in .claude.json, which is per account.
+  # Copy their definitions once through the CLI; their OAuth logins stay per account.
+  local cfg="$HOME_DIR/.claude.json" n p
+  [ -f "$cfg" ] || return 0
+  if ! command -v jq >/dev/null 2>&1; then
+    warn "jq is not installed: your MCP servers were not copied (add them with: csa <name> mcp add ...)"
+    return 0
+  fi
+  jq -r '.mcpServers // {} | keys[]' "$cfg" | while IFS= read -r n; do
+    CLAUDE_CONFIG_DIR="$1" claude mcp add-json -s user "$n" \
+      "$(jq -c --arg n "$n" '.mcpServers[$n]' "$cfg")" </dev/null >/dev/null \
+      || warn "could not copy MCP server '$n'"
+  done
+  jq -r '.projects // {} | to_entries[] | select((.value.mcpServers // {}) != {}) | .key' "$cfg" |
+    while IFS= read -r p; do
+      [ -d "$p" ] || continue   # local scope is keyed by the project dir
+      jq -r --arg p "$p" '.projects[$p].mcpServers | keys[]' "$cfg" | while IFS= read -r n; do
+        (cd "$p" && CLAUDE_CONFIG_DIR="$1" claude mcp add-json -s local "$n" \
+          "$(jq -c --arg p "$p" --arg n "$n" '.projects[$p].mcpServers[$n]' "$cfg")" </dev/null >/dev/null) \
+          || warn "could not copy MCP server '$n' from $p"
+      done
+    done
+}
+
+NEW_DIR=
+trap '[ -z "$NEW_DIR" ] || rm -rf "$NEW_DIR"' EXIT   # undo a half-made account
+
+add() {
+  local name=${1:-}
+  check_name "$name"
+  shift
+  local dir="$ROOT/$name"
+  if [ -e "$dir" ] || [ -L "$dir" ]; then
+    die "account '$name' already exists ($dir)"
+  fi
+  umask 077   # the account dir holds credentials
+  mkdir -p "$ROOT"
+  mkdir "$dir"
+  NEW_DIR=$dir
+  # every account must write to the same settings file, so make sure it exists
+  if [ ! -e "$SRC/settings.json" ]; then
+    mkdir -p "$SRC"
+    echo '{}' > "$SRC/settings.json"
+  fi
+  sync_links "$dir"
+  copy_plugins "$dir"
+  copy_mcp "$dir" || warn "could not copy your MCP servers"
+  NEW_DIR=
+  echo "Account '$name' created in $dir. Log in with the account you want to use here:"
+  CLAUDE_CONFIG_DIR="$dir" claude auth login "$@" \
+    || die "login did not complete; retry with: csa $name auth login"
+  echo "Done. Use it with: csa $name"
+}
+
+env_warn() {
+  local v
+  for v in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN; do
+    if [ -n "${!v:-}" ]; then
+      warn "$v is set in your shell: Claude will use it instead of the account's login"
+    fi
+  done
+}
+
+case ${1:-} in
+  ''|-h|--help|help) usage; echo; list; exit 0 ;;
+  ls) list; exit 0 ;;
+esac
+command -v claude >/dev/null 2>&1 || die "'claude' not found in PATH"
+case $1 in
+  add) shift; add "$@" ;;
+  *)
+    name=$1
+    shift
+    check_name "$name"
+    dir="$ROOT/$name"
+    [ -d "$dir" ] || die "account '$name' does not exist (create it with: csa add $name)"
+    sync_links "$dir"
+    env_warn
+    CLAUDE_CONFIG_DIR="$dir" exec claude "$@"
+    ;;
+esac

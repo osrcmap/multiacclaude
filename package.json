@@ -1,6 +1,6 @@
 {
   "name": "@osrcmap/multiacclaude",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Switch between Claude Code accounts (work, personal…) while sharing your config",
   "keywords": [
     "claude-code",

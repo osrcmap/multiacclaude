@@ -31,6 +31,11 @@ csa ls                   # list accounts and their email
 claude                   # your usual account (~/.claude), unchanged
 ```
 
+> **Note:** `csa add` opens the login page in your default browser, which is usually still
+> signed in to your other Claude account, so you would log in to the wrong one. Instead, copy
+> the login URL printed in the terminal into a private/incognito window (or another browser
+> profile) and sign in there with the account you are adding.
+
 ## What is shared and what is not
 
 The default account (`~/.claude`) is the source. Other accounts live in

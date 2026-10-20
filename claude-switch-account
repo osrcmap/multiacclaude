@@ -154,7 +154,9 @@ add() {
   copy_plugins "$dir"
   copy_mcp "$dir" || warn "could not copy your MCP servers"
   NEW_DIR=
-  echo "Account '$name' created in $dir. Log in with the account you want to use here:"
+  echo "Account '$name' created in $dir. Log in with the account you want to use here."
+  echo "Tip: if your browser is signed in to another Claude account, open the login URL"
+  echo "shown below in a private/incognito window instead."
   CLAUDE_CONFIG_DIR="$dir" claude auth login "$@" \
     || die "login did not complete; retry with: csa $name auth login"
   echo "Done. Use it with: csa $name"
